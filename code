@@ -1,0 +1,928 @@
+library(Seurat)
+library(tidyverse)
+library(RColorBrewer)
+library(gplots)
+library(ggplot2)
+library(pheatmap)
+library(DiagrammeR)
+library(DiagrammeRsvg)
+library(rsvg)
+install.packages("viridis")  # Install
+library("viridis")   
+library(patchwork)
+library(tidyverse)
+library(grDevices)
+library(grid)
+library(gridBase)
+library(lattice)
+library(VennDiagram)
+library(dplyr)
+library(ggpubr)
+library(NMF)
+library(pROC)
+library(precrec)
+library(cutpointr)
+# Figure 1 A
+# Define the nodes and edges of the flowchart
+nodes <- create_node_df(
+  n = 8, style = "filled", peripheries=2,
+  color = "black",penwidth=0.01,
+  fillcolor = "#Edeff5",fontsize=12, fontname = "Times New Roman",
+  fontcolor = c("#063061","#063061","#063061","#063061","#063061","#063061","#063061","#c03338"), shape = c("oval","rectangle","rectangle","rectangle","rectangle","rectangle","rectangle", "oval"),
+  label = c("RNA-seq data", "TPM (Transcript Per Million) using RSEM", "Collecting protein-coding genes expressed in all studies", "TMM (Trimmed Mean of M values Per sample) using metaseqR", "Log1p-transform(log10(x+1))", "Batch correction (limma)", "Expansion(10^x)","Normalized expression")
+)
+edges <- create_edge_df(
+  from = c(1, 2, 3, 4, 5,6,7),
+  to = c(2, 3, 4, 5, 6,7,8), rel = "receives",
+  color = "#063061"
+)
+
+# Create the flowchart object
+flowchart <- create_graph(nodes_df = nodes, edges_df = edges,attr_theme = list(rankdir = "TB"))
+
+p0 <- export_graph(
+  graph = flowchart, 
+  file_name = "flowchart.pdf", 
+  file_type = "pdf",
+  width = 700,
+  height = 1200
+)
+
+# Render the flowchart
+# render_graph(flowchart)
+
+#Figure 1 BCDE
+sample <- read.csv("latestNAFLDSAMPLES0617revised.csv")
+#COUNTS
+anterior <- read.delim("NAFLD_limma_Info.tsv.gz")
+rownames(anterior) <- anterior$GeneName
+anterior <- anterior[,-1]
+anterior <- apply(anterior, 2, function(x) 10^x)
+anterior <- as.data.frame(anterior)
+anterior <- CreateSeuratObject(anterior)
+rownames(sample) <- sample$GSM
+anterior <- AddMetaData(anterior, sample)
+anterior <- NormalizeData(anterior)
+anterior@assays$RNA@data[is.na(anterior@assays$RNA@data)] <- 0
+all.genes <- rownames(anterior)
+anterior <- ScaleData(anterior, features = all.genes)
+anterior <- FindVariableFeatures(anterior)
+anterior <- RunPCA(anterior, features = VariableFeatures(object = anterior))
+anterior <- RunUMAP(anterior, dims = 1:10)
+anterior <- RunTSNE(anterior, check_duplicates = FALSE)
+
+saveRDS(anterior, file = "anterior.rds")
+anterior <- readRDS("anterior.rds")
+
+Idents(anterior) <- "GSE"
+p1 <- DimPlot(anterior, pt.size = 2, cols = c("#f98071","#fdbd6d","#ad1544","#c1dced","lightgrey","#063061","#428ec0"), reduction = "pca") + labs(color = "Source")
+Idents(anterior) <- "nCount_RNA"
+p2 <- FeaturePlot(anterior, pt.size = 2, features =c("nCount_RNA") , reduction = "pca")+ scale_colour_gradientn(colours = rev(c("#ad1544","#fdbd6d","lightgrey","#428ec0","#063061"))) + labs(color = "nCount_RNA")
+Idents(anterior) <- "FIB"
+levels(anterior) = c("F0", "F1", "F2", "F3", "F4")
+p4 <- DimPlot(anterior, pt.size = 2, cols = c("#063061","#428ec0","lightgrey","#fdbd6d","#ad1544"), reduction = "pca") + labs(color = "Fibrosis score")
+Idents(anterior) <- "NAS"
+anterior$NAS <- factor(anterior$NAS, levels = c("N0", "N1", "N2", "N3", "N4", "N5", "N6", "N7", "N8"))
+p3 <- DimPlot(anterior, pt.size = 2, cols = c("#7c117b","#8d6bae","#c1dced","#428ec0","#063061","lightgrey","#f98071","#fdbd6d","#ad1544"), reduction = "pca") + labs(color = "NAS score")
+
+p1
+p2
+p3
+p4
+
+p1 + p2 + p3 + p4 + plot_layout(ncol=2)
+p3 + p4 + plot_layout(ncol=2)
+
+#Figure 2
+MSBrevised <- read.csv("MSBrevised.csv",row.names = 1)
+MSBrevised <- as.data.frame(MSBrevised)
+MSBrevised <- CreateSeuratObject(MSBrevised)
+MSBmeta <- read.csv("MSBmeta.csv")
+rownames(MSBmeta) <- MSBmeta$sample
+MSBrevised <- AddMetaData(MSBrevised, MSBmeta)
+MSBrevised <- NormalizeData(MSBrevised)
+all.genes <- rownames(MSBrevised)
+MSBrevised <- ScaleData(MSBrevised, features = all.genes)
+MSBrevised <- FindVariableFeatures(MSBrevised)
+MSBrevised <- RunPCA(MSBrevised, npcs = 39, features = VariableFeatures(object = MSBrevised))
+print(MSBrevised[["pca"]], dims = 1:5, nfeatures = 5)
+VizDimLoadings(MSBrevised, dims = 1:2, reduction = "pca")
+DimPlot(MSBrevised, reduction = "pca")
+DimHeatmap(MSBrevised, dims = 1, cells = 48, balanced = TRUE)
+MSBrevised <- JackStraw(MSBrevised, num.replicate = 100)
+MSBrevised <- ScoreJackStraw(MSBrevised, dims = 1:20)
+JackStrawPlot(MSBrevised, dims = 1:15)
+ElbowPlot(MSBrevised)
+MSBrevised <- RunUMAP(MSBrevised, dims = 1:10)
+DimPlot(MSBrevised, reduction = "umap")
+MSBrevised1 <- MSBrevised
+MSBrevised <- MSBrevised1
+Idents(MSBrevised) <- "group2"
+
+saveRDS(MSBrevised, file = "MSBrevised.rds")
+MSBrevised <- readRDS("MSBrevised.rds")
+
+#protein up+down
+HealthyNAFLD.markers <- FindMarkers(MSBrevised, only.pos = T, logfc.threshold = 0, ident.1 = 'Healthy', ident.2 = 'NAFLD')
+NAFLDCirrhosis.markers <- FindMarkers(MSBrevised, only.pos = T, logfc.threshold = 0, ident.1 = 'NAFLD', ident.2 = 'Cirrhosis')
+NAFLDHealthy.markers <- FindMarkers(MSBrevised, only.pos = T, logfc.threshold = 0, ident.1 = 'NAFLD', ident.2 = 'Healthy')
+CirrhosisNAFLD.markers <- FindMarkers(MSBrevised, only.pos = T, logfc.threshold = 0, ident.1 = 'Cirrhosis', ident.2 = 'NAFLD')
+upprotein=NAFLDHealthy.markers[rownames(NAFLDHealthy.markers) %in% rownames(CirrhosisNAFLD.markers),]
+downprotein=HealthyNAFLD.markers[rownames(HealthyNAFLD.markers) %in% rownames(NAFLDCirrhosis.markers),]
+saveRDS(upprotein, file = "upprotein.rds")
+upprotein <- readRDS("upprotein.rds")
+
+saveRDS(downprotein, file = "downprotein.rds")
+downprotein <- readRDS("downprotein.rds")
+
+signatures <- AverageExpression(MSBrevised)$RNA
+signatures1 <- signatures
+signatures <- signatures1
+signaturesup <- signatures1[rownames(signatures1) %in% rownames(upprotein),] 
+pdf("Up-regulated protein in PXD011839.pdf", height=10, width=10)
+heatmap.2(signaturesup,
+          Rowv=F,
+          Colv=F,
+          #    dendrogram= c("none"),
+          distfun = dist,
+          hclustfun = hclust,
+          scale = "row",
+          na.rm=TRUE,
+          key=TRUE,
+          keysize=1,
+          trace="none",
+          density.info=c("none"),
+          margins=c(10, 8),
+          col = colorRampPalette(c("#063061","#428ec0","lightgrey","#fdbd6d","#c03338"))(100)
+)
+dev.off()
+
+signaturesdown <- signatures1[rownames(signatures1) %in% rownames(downprotein),] 
+pdf("Down-regulated protein in PXD011839.pdf", height=10, width=10)
+heatmap.2(signaturesdown,
+          Rowv=F,
+          Colv=F,
+          #    dendrogram= c("none"),
+          distfun = dist,
+          hclustfun = hclust,
+          scale = "row",
+          na.rm=TRUE,
+          key=TRUE,
+          keysize=1,
+          trace="none",
+          density.info=c("none"),
+          margins=c(10, 8),
+          col = colorRampPalette(c("#063061","#428ec0","lightgrey","#fdbd6d","#c03338"))(100)
+          #    col=redgreen(75),
+)
+dev.off()
+
+#venn
+myCol <- brewer.pal(3, "Dark2")
+set1 <- read.csv("UP4cluster1021.csv", header = F)
+UPgene <- set1$V1
+set2 <- read.csv("secreting gene.csv", header = T)
+Secretinggene <- set2$Gene
+upproteinmarker <- rownames(signaturesup)
+table(set2$Gene %in% rownames(signaturesup))
+set4 <- set2[set2$Gene %in% rownames(signaturesup),]
+set4 <- as.data.frame(set4)
+set1 <- as.data.frame(set1)
+table(set4$set4 %in% set1$V1)
+set5 <- set2[set2$Gene %in% set1$V1,]
+set5
+write.csv(set5, file = "UPsecretingcluster249.csv")
+upset <- set1[set2$Gene %in% set1$V1,]
+
+venn.plot <- venn.diagram(
+  x = list(UPgene, Secretinggene, upproteinmarker), 
+  category.names = c("Up-regulated gene in liver" , "Secreting gene" , "Up-regulated protein in PXD011839"),
+  filename = NULL, 
+  fill = c("#063061","lightgrey","#c03338"),
+  alpha = 0.50,
+  label.col = "black",
+  cat.col = c("#063061","darkgrey","#c03338"),
+  cat.cex = 1.5,
+  cat.fontface = "bold",
+  cat.pos = c(-18, 18, 0),
+  cat.dist = c(0.055, 0.055, -0.45),
+  margin = 0.2
+)
+
+pdf(file = "venn_diagram1.pdf")
+grid.draw(venn.plot)
+dev.off()
+
+
+venn.diagram(
+  x = list(UPgene, Secretinggene, upproteinmarker),
+  category.names = c("Up-regulated gene in liver" , "Secreting gene" , "Up-regulated protein in PXD011839"),
+  filename = '#proteome_venn_diagramm1.png',
+  output=TRUE,
+  
+  # Output features
+  imagetype="png" ,
+  height = 3000 , 
+  width = 5000 , 
+  resolution = 800,
+  compression = "lzw",
+  
+  # Circles
+  lwd = 2,
+  lty = 'blank',
+  # fill = c("#063061","lightgrey","#c03338"),
+  fill = c("#063061","lightgrey","#c03338"),
+  
+  # Numbers
+  cex = 1.0,
+  fontface = "bold",
+  fontfamily = "sans",
+  
+  # Set names
+  cat.cex = 1.0,
+  cat.fontface = "bold",
+  cat.default.pos = "outer",
+  cat.pos = c(-10, 10, 0),
+  cat.dist = c(0.055, 0.055, -0.45),
+  cat.fontfamily = "sans",
+  rotation = 1
+)
+
+#Figure 2 B
+set1 <- read.csv("DOWN14cluster643.csv", header = F)
+DOWNgene <- set1$V1
+set2 <- read.csv("secreting gene.csv", header = T)
+Secretinggene <- set2$Gene
+downproteinmarker <- rownames(signaturesdown)
+table(set2$Gene %in% rownames(signaturesdown))
+set4 <- set2[set2$Gene %in% rownames(signaturesdown),]
+set4 <- as.data.frame(set4)
+set1 <- as.data.frame(set1)
+table(set4$set4 %in% set1$V1)
+set6 <- set2[set2$Gene %in% set1$V1,]
+set6
+write.csv(set6, file = "DOWNsecretingcluster100.csv")
+downset <- set1[set2$Gene %in% set1$V1,]
+venn.diagram(
+  x = list(DOWNgene, Secretinggene, downproteinmarker),
+  category.names = c("Down-regulated gene in liver" , "Secreting gene" , "Down-regulated protein in PXD011839"),
+  filename = '#proteome_venn_diagramm2.png',
+  output=TRUE,
+  
+  # Output features
+  imagetype="png" ,
+  height = 3000 , 
+  width = 5000 , 
+  resolution = 800,
+  compression = "lzw",
+  
+  # Circles
+  lwd = 2,
+  lty = 'blank',
+  fill = c("#063061","lightgrey","#c03338"),
+  
+  # Numbers
+  cex = 1.0,
+  fontface = "bold",
+  fontfamily = "sans",
+  
+  # Set names
+  cat.cex = 1.0,
+  cat.fontface = "bold",
+  cat.default.pos = "outer",
+  cat.pos = c(10, -10, 0),
+  cat.dist = c(-0.565, 0.08, -0.595),
+  cat.fontfamily = "sans",
+  rotation = 1
+)
+
+# Figure 3
+sample <- read.csv("latestNAFLDSAMPLES0617revised.csv")
+anterior <- read.delim("NAFLD_limma_Info.tsv.gz")
+rownames(anterior) <- anterior$GeneName
+anterior <- anterior[,-1]
+anterior <- apply(anterior, 2, function(x) 10^x)
+anterior <- as.data.frame(anterior)
+table(colnames(anterior) %in% sample$GSM)
+anterior=anterior[colnames(anterior) %in% sample$GSM,]
+gene <- c("QSOX1","IL1RAP")
+anterior1=anterior[row.names(anterior) %in% gene,]
+sample=sample[match(colnames(anterior1),sample$GSM),]
+anterior2=t(anterior1)
+anterior2=as.data.frame(anterior2)
+anterior4 <- anterior2 %>%
+  add_column(Ratio =anterior2$QSOX1/anterior2$IL1RAP)
+anterior2 = anterior4 
+sample=sample[match(row.names(anterior2),sample$GSM),]
+
+saveRDS(anterior2, file = "anterior2.rds")
+anterior2 <- readRDS("anterior2.rds")
+
+#FIBgroup1
+anterior3 <- anterior2 %>%
+  #add_column(FIBgroup =sample$FIBgroup)
+  mutate(FIBgroup =sample$FIBgroup)
+anterior3$FIBgroup <- factor(anterior3$FIBgroup, levels = c("F0", "F1-2", "F3-4"))
+
+pdf("QSOX1-FIBgroup.pdf",w=6,h=6)
+my_comparisons <- list( c("F0","F1-2"), c("F1-2","F3-4"), c("F0","F3-4"))
+ggboxplot(anterior3, x="FIBgroup", y="QSOX1", color="#808080", repel = TRUE, width=0.5, notch=F,
+          add = "jitter",palette=c("#195297","#abb5c1","#e0999c"), add.params=list(color = "FIBgroup",size=1))+
+  ylim(c(0,60))+
+  stat_compare_means(comparisons = my_comparisons,size=7)+
+  labs(title="",x="",y="Normalized expression of QSOX1")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5))
+dev.off()
+
+pdf("IL1RAP-FIB-group1.pdf",w=6,h=6)
+my_comparisons <- list(  c("F0","F1-2"), c("F1-2","F3-4"), c("F0","F3-4"))
+ggboxplot(anterior3, x="FIBgroup", y="IL1RAP", color="#808080", repel = TRUE, width=0.5, notch=F,
+          add = "jitter",palette=c("#195297","#abb5c1","#e0999c"), add.params=list(color = "FIBgroup",size=1))+
+  ylim(c(0,360))+
+  stat_compare_means(comparisons = my_comparisons,size=7)+
+  labs(title="",x="",y="Normalized expression of IL1RAP")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5))
+dev.off()
+
+pdf("Ratio-FIB-group1.pdf",w=6,h=6)
+my_comparisons <- list(  c("F0","F1-2"), c("F1-2","F3-4"), c("F0","F3-4"))
+ggboxplot(anterior3, x="FIBgroup", y="Ratio", color="#808080", repel = TRUE, width=0.5, notch=F,
+          add = "jitter",palette=c("#195297","#abb5c1","#e0999c"), add.params=list(color = "FIBgroup",size=1))+
+  ylim(c(0,4))+
+  stat_compare_means(comparisons = my_comparisons,size=7)+
+  labs(title="",x="",y="The ratio of QSOX1/IL1RAP")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5))
+dev.off()
+
+#NAS group
+anterior3 <- anterior2 %>%
+  mutate(NASgroup =sample$NASgroup)
+anterior3$NASgroup <- factor(anterior3$NASgroup, levels = c("N0","N1-4", "N5-8"))
+
+pdf("QSOX1-NAS-group.pdf",w=6,h=6)
+my_comparisons <- list( c("N0","N1-4"), c("N0","N5-8"), c("N1-4","N5-8"))
+ggboxplot(anterior3, x="NASgroup", y="QSOX1", color="#808080", repel = TRUE, width=0.5, notch=F,
+          add = "jitter",palette=c("#195297","#abb5c1","#e0999c"), add.params=list(color = "NASgroup",size=1))+
+  ylim(c(0,60))+
+  stat_compare_means(comparisons = my_comparisons,size=7)+
+  labs(title="",x="",y="Normalized expression of QSOX1")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5))
+dev.off()
+
+pdf("IL1RAP-NAS-group.pdf",w=6,h=6)
+my_comparisons <- list( c("N0","N1-4"), c("N0","N5-8"), c("N1-4","N5-8"))
+ggboxplot(anterior3, x="NASgroup", y="IL1RAP", color="#808080", repel = TRUE, width=0.5, notch=F,
+          add = "jitter",palette=c("#195297","#abb5c1","#e0999c"), add.params=list(color = "NASgroup",size=1))+
+  ylim(c(0,360))+
+  stat_compare_means(comparisons = my_comparisons,size=7)+
+  labs(title="",x="",y="Normalized expression of IL1RAP")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5))
+dev.off()
+
+pdf("Ratio-NAS-group.pdf",w=6,h=6)
+my_comparisons <- list( c("N0","N1-4"), c("N0","N5-8"), c("N1-4","N5-8"))
+ggboxplot(anterior3, x="NASgroup", y="Ratio", color="#808080", repel = TRUE, width=0.5, notch=F,
+          add = "jitter",palette=c("#195297","#abb5c1","#e0999c"), add.params=list(color = "NASgroup",size=1))+
+  ylim(c(0,4))+
+  stat_compare_means(comparisons = my_comparisons,size=7)+
+  labs(title="",x="",y="The ratio of QSOX1/IL1RAP")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5))
+dev.off()
+
+#Figure 4
+#NAFLD protein
+protein <- read.csv("NAFLDprotein.csv")
+protein$Group <- factor(protein$Group, levels = c("Healthy", "NAFLD", "Cirrhosis"))
+
+pdf("1Protein-QSOX1-group2.pdf",w=4,h=7)
+my_comparisons <- list(c("Healthy","NAFLD"), c("NAFLD","Cirrhosis"), c("Healthy","Cirrhosis"))
+ggboxplot(protein, x="Group", y="QSOX1", color="lightgrey", repel = TRUE, width=0.5, notch=F,
+          add = "jitter",palette=c("#195297","#be7fbc","#e52c8d"), add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "wilcox.test")+
+  labs(title="",x="",y="Protein expression of QSOX1")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=40, hjust=1),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+pdf("Protein-IL1RAP-group.pdf",w=4,h=7)
+my_comparisons <- list(c("Healthy","NAFLD"), c("NAFLD","Cirrhosis"), c("Healthy","Cirrhosis"))
+ggboxplot(protein, x="Group", y="IL1RAP", color="lightgrey", repel = TRUE, width=0.5, notch=FALSE,
+          add = "jitter",palette=c("#195297","#be7fbc","#e52c8d"),add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "wilcox.test")+
+  labs(title="",x="",y="Protein expression of IL1RAP")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=40, hjust=1),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+pdf("Protein-Ratio-group.pdf",w=4,h=7)
+my_comparisons <- list(c("Healthy","NAFLD"), c("NAFLD","Cirrhosis"), c("Healthy","Cirrhosis"))
+ggboxplot(protein, x="Group", y="Ratio", color="lightgrey", repel = TRUE, width=0.5, notch=FALSE,
+          add = "jitter",palette=c("#195297","#be7fbc","#e52c8d"),add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "wilcox.test")+
+  labs(title="",x="",y="Ratio of QSOX1 / IL1RAP")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=40, hjust=1),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+#ELISA
+protein <- read.csv("ELISA.csv")
+protein$Group <- factor(protein$Group, levels = c("Healthy", "NAFLD"))
+
+pdf("ELISA-QSOX1-group.pdf",w=4,h=7)
+my_comparisons <- list(c("Healthy","NAFLD"))
+ggboxplot(protein, x="Group", y="QSOX1", color="lightgrey", repel = TRUE, width=0.5, notch=F,
+          add = "jitter",palette=c("#195297","#be7fbc"), add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "wilcox.test")+
+  labs(title="",x="",y="Protein expression of QSOX1 (pg/ml)")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=40, hjust=1),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+pdf("ELISA-IL1RAP-group.pdf",w=4,h=7)
+my_comparisons <- list(c("Healthy","NAFLD"))
+ggboxplot(protein, x="Group", y="IL1RAP", color="lightgrey", repel = TRUE, width=0.5, notch=FALSE,
+          add = "jitter",palette=c("#195297","#be7fbc"),add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "wilcox.test")+
+  labs(title="",x="",y="Protein expression of IL1RAP (pg/ml)")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=40, hjust=1),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+pdf("ELISA-Ratio-group.pdf",w=4,h=7)
+my_comparisons <- list(c("Healthy","NAFLD"))
+ggboxplot(protein, x="Group", y="Ratio", color="lightgrey", repel = TRUE, width=0.5, notch=FALSE,
+          add = "jitter",palette=c("#195297","#be7fbc"),add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "wilcox.test")+
+  labs(title="",x="",y="Ratio of QSOX1 / IL1RAP")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=40, hjust=1),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+#Figure 5
+staining <- read.csv("NAFLDstaining.csv")
+staining$Group <- factor(staining$Group, levels = c("Mild", "Severe"))
+
+pdf("NAFLD-Figure5-STAINING-QSOX1-group.pdf",w=4,h=6)
+my_comparisons <- list(c("Mild", "Severe"))
+ggboxplot(staining, x="Group", y="lgQSOX1", color="lightgrey", repel = TRUE, width=0.5, notch=FALSE,
+          add = "jitter",palette=c("#195297","#be7fbc"),add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "t.test")+
+  labs(title="",x="",y="Integrated Density of QSOX1 (lg)")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+pdf("NAFLD-Figure5-STAINING-IL1RAP-group.pdf",w=4,h=6)
+my_comparisons <- list(c("Mild", "Severe"))
+ggboxplot(staining, x="Group", y="lgIL1RAP", color="lightgrey", repel = TRUE, width=0.5, notch=FALSE,
+          add = "jitter",palette=c("#195297","#be7fbc"),add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "t.test")+
+  labs(title="",x="",y="Integrated Density of IL1RAP (lg)")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+pdf("NAFLD-Figure5-STAINING-Ratio-group.pdf",w=4,h=6)
+my_comparisons <- list(c("Mild", "Severe"))
+ggboxplot(staining, x="Group", y="Ratio", color="lightgrey", repel = TRUE, width=0.5, notch=FALSE,
+          add = "jitter",palette=c("#195297","#be7fbc"),add.params=list(color = "Group",size=2))+
+  #  ylim(c(0,50))+
+  stat_compare_means(comparisons = my_comparisons,size=7,method = "t.test")+
+  labs(title="",x="",y="Ratio of QSOX1(lg)/IL1RAP(lg)")+
+  theme(legend.position="none",text = element_text(size=20),axis.text.x = element_text(angle=0, hjust=0.5),plot.margin=unit(c(-1,1,-1,1),"lines"),)
+dev.off()
+
+#SUPPLEMENTARY Figure 1
+sample <- read.csv("latestNAFLDSAMPLES0617revised.csv")
+#COUNTS
+anterior <- read.delim("NAFLD_limma_Info.tsv.gz")
+rownames(anterior) <- anterior$GeneName
+anterior <- anterior[,-1]
+anterior <- apply(anterior, 2, function(x) 10^x)
+anterior <- as.data.frame(anterior)
+anterior <- CreateSeuratObject(anterior)
+rownames(sample) <- sample$GSM
+anterior <- AddMetaData(anterior, sample)
+anterior <- NormalizeData(anterior)
+anterior@assays$RNA@data[is.na(anterior@assays$RNA@data)] <- 0
+all.genes <- rownames(anterior)
+anterior <- ScaleData(anterior, features = all.genes)
+anterior <- FindVariableFeatures(anterior)
+anterior <- RunPCA(anterior, features = VariableFeatures(object = anterior))
+anterior <- RunUMAP(anterior, dims = 1:10)
+anterior <- RunTSNE(anterior, check_duplicates = FALSE)
+
+#SUPPL Figure
+anterior1 <- anterior
+anterior <- anterior1
+saveRDS(anterior1, file = "anterior1.rds")
+anterior1 <- readRDS("anterior1.rds")
+
+#FIB UPcluster
+Idents(anterior) <- "FIB"
+levels(anterior) = c("F0", "F1", "F2", "F3", "F4")
+anterior@assays$RNA@data[is.na(anterior@assays$RNA@data)] <- 0
+signatures <- AverageExpression(anterior)$RNA
+upsignatures=as.data.frame(signatures)
+
+upgene <- read.csv("UP4cluster1021.csv", header = F)
+upsignatures1=upsignatures[rownames(upsignatures) %in% upgene$V1,]
+upsignatures1 <- as.matrix(upsignatures1)
+table(rownames(upsignatures1) %in% upgene$V1)
+pdf("FIBCluster4.pdf", height=10, width=10)
+heatmap.2(upsignatures1,
+          Rowv=F,
+          Colv=F,
+          #    dendrogram= c("none"),
+          distfun = dist,
+          hclustfun = hclust,
+          scale = "row",
+          na.rm=TRUE,
+          key=TRUE,
+          keysize=1,
+          trace="none",
+          density.info=c("none"),
+          margins=c(10, 8),
+          col = colorRampPalette(c("#063061","#428ec0","lightgrey","#fdbd6d","#c03338"))(100)
+          #    col=redgreen(75),
+)
+dev.off()
+
+#FIB DOWN14cluster643
+upgene <- read.csv("DOWN14cluster643.csv", header = F)
+upsignatures1=upsignatures[rownames(upsignatures) %in% upgene$V1,]
+upsignatures1 <- as.matrix(upsignatures1)
+table(rownames(upsignatures1) %in% upgene$V1)
+pdf("FIBCluster14.pdf", height=10, width=10)
+heatmap.2(upsignatures1,
+          Rowv=F,
+          Colv=F,
+          #    dendrogram= c("none"),
+          distfun = dist,
+          hclustfun = hclust,
+          scale = "row",
+          na.rm=TRUE,
+          key=TRUE,
+          keysize=1,
+          trace="none",
+          density.info=c("none"),
+          margins=c(10, 8),
+          col = colorRampPalette(c("#063061","#428ec0","lightgrey","#fdbd6d","#c03338"))(100)
+          #    col=redgreen(75),
+)
+dev.off()
+
+#NAS UPcluster4
+Idents(anterior) <- "NAS"
+anterior$NAS <- factor(anterior$NAS, levels = c("N0", "N1", "N2", "N3", "N4", "N5", "N6", "N7", "N8"))
+anterior@assays$RNA@data[is.na(anterior@assays$RNA@data)] <- 0
+signatures <- AverageExpression(anterior, group.by = "NAS")$RNA
+upsignatures=as.data.frame(signatures)
+
+upgene <- read.csv("UP4cluster1021.csv", header = F)
+upsignatures1=upsignatures[rownames(upsignatures) %in% upgene$V1,]
+upsignatures1 <- as.matrix(upsignatures1)
+table(rownames(upsignatures1) %in% upgene$V1)
+pdf("NASCluster4.pdf", height=10, width=10)
+heatmap.2(upsignatures1,
+          Rowv=F,
+          Colv=F,
+          #    dendrogram= c("none"),
+          distfun = dist,
+          hclustfun = hclust,
+          scale = "row",
+          na.rm=TRUE,
+          key=TRUE,
+          keysize=1,
+          trace="none",
+          density.info=c("none"),
+          margins=c(10, 8),
+          col = colorRampPalette(c("#063061","#428ec0","lightgrey","#fdbd6d","#c03338"))(100)
+          #    col=redgreen(75),
+)
+dev.off()
+
+#NAS DOWN14cluster643
+upgene <- read.csv("DOWN14cluster643.csv", header = F)
+upsignatures1=upsignatures[rownames(upsignatures) %in% upgene$V1,]
+upsignatures1 <- as.matrix(upsignatures1)
+table(rownames(upsignatures1) %in% upgene$V1)
+pdf("NASCluster14.pdf", height=10, width=10)
+heatmap.2(upsignatures1,
+          Rowv=F,
+          Colv=F,
+          #    dendrogram= c("none"),
+          distfun = dist,
+          hclustfun = hclust,
+          scale = "row",
+          na.rm=TRUE,
+          key=TRUE,
+          keysize=1,
+          trace="none",
+          density.info=c("none"),
+          margins=c(10, 8),
+          col = colorRampPalette(c("#063061","#428ec0","lightgrey","#fdbd6d","#c03338"))(100)
+          #    col=redgreen(75),
+)
+dev.off()
+
+#SUPPL Figure D cluster correlation
+
+anterior <- read.delim("NAFLD_limma_Info.tsv.gz")
+rownames(anterior) <- anterior$GeneName
+anterior <- anterior[,-1]
+anterior <- apply(anterior, 2, function(x) 10^x)
+anteriorT <- as.data.frame(anterior)
+anteriorT <- data.frame(t(anteriorT))
+anteriorT <- CreateSeuratObject(anteriorT)
+anteriorT <- NormalizeData(anteriorT)
+anteriorT@assays$RNA@data[is.na(anteriorT@assays$RNA@data)] <- 0
+all.genes <- rownames(anteriorT)
+anteriorT <- ScaleData(anteriorT, features = all.genes)
+anteriorT <- FindVariableFeatures(anteriorT)
+anteriorT <- RunPCA(anteriorT, features = VariableFeatures(object = anteriorT))
+anteriorT <- RunUMAP(anteriorT, dims = 1:20)
+anteriorT <- RunTSNE(anteriorT, check_duplicates = FALSE)
+#DimPlot(anteriorT, reduction = "tsne")
+#DimPlot(anteriorT, reduction = "tsne", label = TRUE)
+anteriorT <- FindNeighbors(anteriorT, reduction = "pca", dims = 1:20)
+#anteriorT <- FindClusters(anteriorT, resolution = seq(0.1, 20.0, by = 0.1))
+#write.csv(anteriorT@meta.data, file = "R0-20anteriorT230425.csv")
+anteriorT <- FindClusters(anteriorT, resolution = 2.3)
+Idents(anteriorT) <- "RNA_snn_res.2.3"
+DimPlot(anteriorT, reduction = "tsne",label = TRUE)
+DimPlot(anteriorT, reduction = "umap",label = TRUE)
+saveRDS(anteriorT, file = "anteriorT.rds")
+anteriorT <- readRDS("anteriorT.rds")
+
+#correlation analysis
+av.exp <- AverageExpression(anteriorT, assays = "RNA",group.by = "RNA_snn_res.2.3")$RNA
+cor.exp1 <- as.data.frame(cor(av.exp))
+cor.exp1 <- as.data.frame.matrix(cor.exp1)
+pdf("correlation analysis5.pdf", width = 10, height = 8)
+pheatmap(cor.exp1,fontsize = 8,border_color = NA,clustering_distance_cols= "correlation",clustering_distance_rows= "correlation")
+dev.off()
+
+anterior <- as.data.frame(anterior)
+anterior <- CreateSeuratObject(anterior)
+sample <- read.csv("latestNAFLDSAMPLES0617revised.csv")
+rownames(sample) <- sample$GSM
+anterior <- AddMetaData(anterior, sample)
+anterior <- NormalizeData(anterior)
+anterior@assays$RNA@data[is.na(anterior@assays$RNA@data)] <- 0
+all.genes <- rownames(anterior)
+anterior <- ScaleData(anterior, features = all.genes)
+anterior <- FindVariableFeatures(anterior)
+anterior <- RunPCA(anterior, features = VariableFeatures(object = anterior))
+matrix <- read.csv("R0-20anteriorT230425.csv")
+rownames(matrix) <- matrix$X
+matrix <- matrix[,-(1:1)]
+anterior1 <- anterior
+anterior4 <- anterior1
+anterior <- anterior1
+saveRDS(anterior4, file = "anterior4.rds")
+anterior4 <- readRDS("anterior4.rds")
+anterior <- anterior4
+anterior1 <- anterior4
+
+
+#FIB
+Idents(anterior) <- "FIB"
+levels(anterior) = c("F0", "F1", "F2", "F3", "F4")
+signatures <- AverageExpression(anterior)$RNA
+signatures=as.data.frame(signatures)
+signatures1 <- signatures
+
+
+for (i in 0:36) {
+  gene <- rownames(matrix %>%filter(matrix$RNA_snn_res.2.3 == i) )
+  signatures1=signatures[rownames(signatures) %in% gene,]
+  signatures1 <- as.matrix(signatures1)
+  pdf(paste(i,"FIBCluster.pdf"), height=10, width=10)
+  heatmap.2(signatures1,
+            Rowv=F,
+            Colv=F,
+            #    dendrogram= c("none"),
+            distfun = dist,
+            hclustfun = hclust,
+            scale = "row",
+            na.rm=TRUE,
+            key=TRUE,
+            keysize=1,
+            trace="none",
+            density.info=c("none"),
+            margins=c(10, 8),
+            col = colorRampPalette(c("#063061","#428ec0","lightgrey","#fdbd6d","#c03338"))(100)
+            #    col=redgreen(75),
+  )}
+  dev.off()
+  
+  #NAS
+  Idents(anterior1) <- "NAS"
+  anterior1$NAS <- factor(anterior1$NAS, levels = c("N0", "N1", "N2", "N3", "N4", "N5", "N6", "N7", "N8"))
+  signatures <- AverageExpression(anterior1)$RNA
+  signatures=as.data.frame(signatures)
+  signatures1 <- signatures  
+  
+  for (i in 0:36) {
+    gene <- rownames(matrix %>%filter(matrix$RNA_snn_res.2.3 == i) )
+    signatures1=signatures[rownames(signatures) %in% gene,]
+    signatures1 <- as.matrix(signatures1)
+    pdf(paste(i,"NASCluster.pdf"), height=10, width=10)
+    heatmap.2(signatures1,
+              Rowv=F,
+              Colv=F,
+              #    dendrogram= c("none"),
+              distfun = dist,
+              hclustfun = hclust,
+              scale = "row",
+              na.rm=TRUE,
+              key=TRUE,
+              keysize=1,
+              trace="none",
+              density.info=c("none"),
+              margins=c(10, 8),
+              col = colorRampPalette(c("#063061","#428ec0","lightgrey","#fdbd6d","#c03338"))(100)
+              #    col=redgreen(75),
+    )}
+  dev.off()  
+
+
+signatures <- signatures1[rownames(signatures1) %in% rownames(matrix %>% 
+                                                                filter(matrix$RNA_snn_res.2.3 == 0) ),] 
+heatmap(signatures,
+        main = "cluster0", Rowv=NA,
+        Colv = NA)
+dev.copy2pdf(width = 15, height = 20, pointsize = T, file="cluster0.pdf")
+
+
+#ego
+
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("org.Hs.eg.db")
+library(org.Hs.eg.db)
+library(clusterProfiler)
+gene <- read.csv("UP4cluster1021.csv", header = F)
+ego <- enrichGO(gene          = gene$V1,
+                OrgDb         = org.Hs.eg.db,
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05,
+                keyType="SYMBOL")
+write.csv(ego, file = "UP4cluster1021ego.csv")
+gene <- read.csv("DOWN14cluster643.csv", header = F)
+ego <- enrichGO(gene          = gene$V1,
+                OrgDb         = org.Hs.eg.db,
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05,
+                keyType="SYMBOL")
+write.csv(ego, file = "DOWN14cluster643ego.csv")
+
+#ROC
+df <- read.csv("NAFLDprotein.csv")
+df$Group <- factor(df$Group, levels = c("Healthy", "NAFLD"))
+
+#QSOX1 Healthy and NAFLD 0.765
+pROC_obj <- roc(df$Group,df$QSOX1,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "QSOX1 Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+
+#IL1RAP Healthy and NAFLD 0.920
+pROC_obj <- roc(df$Group,df$IL1RAP,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "IL1RAP Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+
+#Ratio Healthy and NAFLD 0.950
+pROC_obj <- roc(df$Group,df$Ratio,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "Ratio Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+
+
+#NAFLD+Cirrhosis
+df <- read.csv("NAFLDprotein.csv")
+df$GROUP2 <- factor(df$GROUP2, levels = c("Healthy", "NAFLD"))
+
+#QSOX1 Healthy and NAFLD 0.765
+pROC_obj <- roc(df$GROUP2,df$QSOX1,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "QSOX1 Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+
+#IL1RAP Healthy and NAFLD 0.917
+pROC_obj <- roc(df$GROUP2,df$IL1RAP,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "IL1RAP Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+
+#Ratio Healthy and NAFLD 0.953
+pROC_obj <- roc(df$GROUP2,df$Ratio,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "Ratio Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+
+#Cirrhosis
+df <- read.csv("NAFLDprotein.csv")
+df$Group <- factor(df$Group, levels = c("Healthy", "Cirrhosis"))
+
+#QSOX1 Healthy and Cirrhosis 0.765
+pROC_obj <- roc(df$Group,df$QSOX1,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "QSOX1 Healthy and Cirrhosis")
+sens.ci <- ci.se(pROC_obj)
+
+#IL1RAP Healthy and Cirrhosis 0.910
+pROC_obj <- roc(df$Group,df$IL1RAP,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "IL1RAP Healthy and Cirrhosis")
+sens.ci <- ci.se(pROC_obj)
+
+#Ratio Healthy and Cirrhosis 0.960
+pROC_obj <- roc(df$Group,df$Ratio,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "Ratio Healthy and Cirrhosis")
+sens.ci <- ci.se(pROC_obj)
+
+# ELISA
+df <- read.csv("ELISA.csv")
+df$Group <- factor(df$Group, levels = c("Healthy", "NAFLD"))
+
+#QSOX1 Healthy and NAFLD 0.694
+pROC_obj <- roc(df$Group,df$QSOX1,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "QSOX1 Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+
+#IL1RAP Healthy and NAFLD 0.702
+pROC_obj <- roc(df$Group,df$IL1RAP,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "IL1RAP Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+
+#Ratio Healthy and NAFLD 0.816
+pROC_obj <- roc(df$Group,df$Ratio,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE, main = "Ratio Healthy and NAFLD")
+sens.ci <- ci.se(pROC_obj)
+cp <- cutpointr(df, Ratio,Group,  pos_class = "NAFLD", neg_class = "Healthy", direction = ">=",
+                method = maximize_metric, metric = sum_sens_spec)
+summary(cp)
+
+ROCit_obj <- rocit(score=df$Ratio,class=df$Group)
+plot(ROCit_obj,col = c("blue", "#BEBEBE"), legend = TRUE,values = TRUE,YIndex = TRUE)
+ROCit_obj
